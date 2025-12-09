@@ -16,3 +16,4 @@ nosetests.xml
 *.cover
 
 RePhraseData/
+uv.lock
