@@ -1,14 +1,13 @@
 #!/usr/bin/env python3
 import argparse
-import os
 import time
 import json
 from urllib.parse import urljoin, urlparse
 import requests
 from bs4 import BeautifulSoup
+from pathlib import Path
 
 DEFAULT_USER_AGENT = "MyChapterArchiver/1.0 (+contact@example.com)"
-
 
 def fetch_page(session, url, timeout=15):
     """Fetch a page and return (response_text, final_url) or (None, None) on error."""
@@ -63,13 +62,15 @@ def save_entry(output_dir, url, content_text, save_metadata=False):
     """
     Save the chapter entry as a text file plus optional metadata JSON.
     """
-    os.makedirs(output_dir, exist_ok=True)
+    raw_dir = Path(f"{output_dir}")
 
+    if not raw_dir.exists():
+        raw_dir.mkdir()
     slug = slugify_from_url(url)
-    base_name = os.path.splitext(slug)[0] or "page"
+    base_name = Path(slug).stem or "page"
 
-    txt_path = os.path.join(output_dir, f"{base_name}.txt")
-    meta_path = os.path.join(output_dir, f"{base_name}.json")
+    txt_path = raw_dir.joinpath(f"{base_name}.txt")
+    meta_path = output_dir.joinpath(f"{base_name}.json")
 
     with open(txt_path, "w", encoding="utf-8") as f:
         f.write(content_text)
@@ -84,6 +85,22 @@ def save_entry(output_dir, url, content_text, save_metadata=False):
 
     print(f"[INFO] Saved {url} -> {txt_path}")
 
+def load_state(output_dir):
+    STATE_FILE = Path(f"{output_dir}/state.json")
+    if not STATE_FILE.exists():
+        return set(), None
+    data = json.loads(STATE_FILE.read_text())
+    visited = set(data.get("visited", []))
+    next_url = data.get("next_url")
+    return visited, next_url
+
+def save_state(visited, next_url, output_dir):
+    STATE_FILE = Path(f"{output_dir}/state.json")
+    data = {
+        "visited": list(visited),
+        "next_url": next_url
+    }
+    STATE_FILE.write_text(json.dumps(data, indent=2))
 
 def crawl(start_url, delay, max_requests, output_dir, base_url=None, save_metadata=False):
     """
@@ -98,9 +115,12 @@ def crawl(start_url, delay, max_requests, output_dir, base_url=None, save_metada
         parsed = urlparse(start_url)
         base_url = f"{parsed.scheme}://{parsed.netloc}"
 
-    visited = set()
-    current_url = start_url
+
+    visited, current_url = load_state(output_dir)
+    if not current_url:
+        current_url = start_url
     requests_made = 0
+
 
     while current_url and requests_made < max_requests:
         if current_url in visited:
@@ -133,6 +153,8 @@ def crawl(start_url, delay, max_requests, output_dir, base_url=None, save_metada
             time.sleep(delay)
 
         current_url = next_url
+
+    save_state(visited, current_url, output_dir)
 
     print(f"[INFO] Crawl finished. Pages fetched: {requests_made}")
 
